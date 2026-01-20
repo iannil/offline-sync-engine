@@ -1,0 +1,44 @@
+{
+  "name": "@offline-sync/engine",
+  "version": "0.1.0",
+  "description": "Local-First 离线同步引擎，专为弱网环境优化",
+  "private": true,
+  "keywords": [
+    "offline-first",
+    "sync",
+    "local-first",
+    "rxdb",
+    "couchdb",
+    "crdt"
+  ],
+  "author": "ZRS Products",
+  "license": "MIT",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "test:e2e": "turbo run test:e2e",
+    "lint": "turbo run lint",
+    "lint:fix": "turbo run lint:fix",
+    "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "clean": "turbo run clean && rm -rf node_modules"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "prettier": "^3.1.0",
+    "turbo": "^1.11.0",
+    "typescript": "^5.3.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=10.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/zrs-products/offline-sync-engine.git"
+  }
+}

@@ -1,0 +1,71 @@
+# ============================================
+# 离线同步引擎 - Git Ignore 配置
+# ============================================
+
+# 依赖
+node_modules/
+jspm_packages/
+
+# 构建输出
+dist/
+build/
+out/
+*.tsbuildinfo
+
+# 缓存
+.cache/
+.parcel-cache/
+.next/
+.nuxt/
+.vuepress/dist/
+.serverless/
+.fusebox/
+.dynamodb/
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+.env.development
+.env.production
+.env.test
+
+# 日志
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# 编辑器
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# 测试覆盖率
+coverage/
+*.lcov
+.nyc_output/
+
+# 临时文件
+tmp/
+temp/
+*.tmp
+
+# 操作系统
+Thumbs.db
+.DS_Store
+*.bak
+
+# 打包文件
+*.tgz
+*.zip
+
+# 调试
+*.cpuprofile
+*.heapsnapshot
