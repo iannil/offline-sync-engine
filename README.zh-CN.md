@@ -74,7 +74,7 @@
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-org/offline-sync-engine.git
+git clone https://github.com/iannil/offline-sync-engine.git
 cd offline-sync-engine
 
 # 安装依赖

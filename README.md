@@ -75,7 +75,7 @@ A complete offline sync solution using Local-First architecture. Apps run fully 
 
 ```bash
 # Clone repository
-git clone https://github.com/your-org/offline-sync-engine.git
+git clone https://github.com/iannil/offline-sync-engine.git
 cd offline-sync-engine
 
 # Install dependencies
