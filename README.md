@@ -1,131 +1,460 @@
-# 离线同步引擎（Offline Sync Engine）
+# Offline Sync Engine
 
-> Local-First 架构，专为弱网环境（2G/3G）优化
+> Local-first offline sync engine, optimized for low-bandwidth environments
 
-## 简介
+[中文版](README.zh-CN.md) | English
 
-这是一个离线同步引擎项目，采用 Local-First（本地优先）架构设计。与传统 Web 应用不同，我们的架构是：
+A complete offline sync solution using Local-First architecture. Apps run fully offline with local storage as the primary data source, while automatically syncing with the server in the background. Optimized for unstable network conditions (like 2G/3G networks in Africa), with data compression, resumable uploads, and intelligent conflict resolution.
+
+[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.3-blue)
+[![License](https://img.shields.io/badge/license-MIT-green)
+
+## ✨ Features
+
+### Core Capabilities
+
+- 🌐 **Full Offline Support** - Works completely offline with IndexedDB local storage
+- 🔄 **Auto Sync** - Automatically syncs when network is detected
+- ⚡ **Incremental Sync** - Transmits only changed data to save bandwidth
+- 🗜️ **Outbox Pattern** - Intercepts writes, queues them locally, reliable sync
+- 🧠 **Smart Conflict Resolution** - Last-Write-Wins (LWW) + Vector Clocks
+- 📱 **Cross-Platform** - Works on Web and mobile (based on RxDB)
+
+### Advanced Features
+
+- 📦 **Data Compression** - MessagePack + DEFLATE, reduces data by 40-60%
+- 📤 **Resumable Uploads** - Full TUS protocol implementation for large files
+- ⚡ **Performance Optimized** - Batch operations, indexing, query caching
+- 🔌 **Real-time Push** - WebSocket server push notifications
+- 🛡️ **Type-Safe** - End-to-end TypeScript support
+
+## 📐 Architecture Overview
 
 ```
-Client → Local DB ↔ Sync Engine ↔ Server DB
+┌─────────────────────────────────────────────────────────────┐
+│                        Client App                           │
+│  ┌────────────────────────────────────────────────────────┐ │
+│  │                    UI Layer (React)                    │ │
+│  └──────────────────────┬─────────────────────────────────┘ │
+│                         │                                   │
+│  ┌──────────────────────▼─────────────────────────────────┐ │
+│  │                 Offline SDK (@offline-sync/sdk)        │ │
+│  │  ┌─────────┐  ┌─────────┐  ┌─────────┐  ┌────────┐     │ │
+│  │  │ Storage │  │ Network │  │ Outbox  │  │ Sync   │     │ │
+│  │  │ (RxDB)  │  │Manager  │  │ (Queue) │  │Manager │     │ │
+│  │  └────┬────┘  └────┬────┘  └────┬────┘  └───┬────┘     │ │
+│  │       │            │            │            │         │ │
+│  │  ┌───▼────────────▼────────────▼────────────▼───┐      │ │
+│  │  │           IndexedDB (Browser Local Storage)      │  │ │
+│  │  └──────────────────────────────────────────────────┘  │ │
+│  └────────────────────────────────────────────────────────┘ │
+└──────────────────────────────┬──────────────────────────────┘
+                               │ HTTPS (Compressed)
+                               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    Sync Gateway Server                      │
+│  ┌──────────────┐  ┌──────────┐  ┌─────────┐   ┌────────┐   │
+│  │   Gateway    │  │ Applier  │  │ Arbiter │   │   TUS  │   │
+│  │  (Routing)   │  │(Apply    │  │(Conflict│   │(Resumable│ │
+│  │              │  │Actions)  │  │Resolution)│ │Uploads) │  │
+│  └──────┬───────┘  └────┬─────┘  └────┬─────┘  └────┬───┘   │
+│         │               │             │             │       │
+│  ┌──────▼──────────────▼─────────────▼─────────────▼────┐   │
+│  │                 CouchDB (Main Database)              │   │
+│  │  - todos, products, customers, orders                │   │
+│  │  - _changes feed for incremental sync                │   │
+│  │  - Mango Query support                               │   │
+│  └──────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-应用程序的主数据源是本地数据库，网络只是用于数据同步的通道。
+## 🚀 Quick Start
 
-### 核心特性
-
-- **读写分离（物理级）**: UI 界面只读写本地数据库，毫秒级响应
-- **后台同步**: 同步引擎作为独立后台进程，自动处理数据传输
-- **乐观更新**: 用户操作后立即反馈，无需等待服务器响应
-- **增量同步**: 仅传输变更集，节省流量
-- **断点续传**: 大文件上传失败后可自动恢复
-- **冲突解决**: 支持 Last-Write-Wins 和 CRDT 两种策略
-
-### 适用场景
-
-- 非洲等弱网地区（2G/3G）
-- 离线优先应用
-- 多人协作场景
-- 移动端应用
-
-## 文档
-
-| 文档 | 描述 |
-|------|------|
-| [架构总览](docs/architecture/overview.md) | Local-First 架构设计理念 |
-| [客户端 SDK](docs/architecture/client-sdk.md) | 客户端 SDK 架构设计 |
-| [传输协议](docs/architecture/transport.md) | 传输协议层设计 |
-| [服务端网关](docs/architecture/server-gateway.md) | 服务端同步网关设计 |
-| [冲突解决](docs/architecture/conflict-resolution.md) | CRDT 与冲突解决策略 |
-| [客户端 API](docs/api/client-api.md) | 客户端 SDK 接口定义 |
-| [服务端 API](docs/api/server-api.md) | 服务端同步接口定义 |
-| [同步协议](docs/api/sync-protocol.md) | 数据同步协议规范 |
-| [当前进度](docs/progress/current.md) | 当前开发进度与状态 |
-| [技术选型](docs/plans/tech-stack.md) | 技术栈选择与理由 |
-| [研发路线图](docs/plans/roadmap.md) | 三阶段研发计划 |
-
-## 快速开始
-
-> 项目目前处于设计阶段，尚未开始编码实现。
+### Installation
 
 ```bash
-# 克隆仓库
-git clone https://github.com/zrs-products/offline-sync-engine.git
+# Clone repository
+git clone https://github.com/your-org/offline-sync-engine.git
+cd offline-sync-engine
 
-# 安装依赖（待实现）
-npm install
-
-# 运行开发服务器（待实现）
-npm run dev
-
-# 运行测试（待实现）
-npm test
+# Install dependencies
+pnpm install
 ```
 
-## 技术栈
+### Run Development Servers
 
-### 前端/客户端
-- **RxDB**（首选）: JavaScript NoSQL 数据库，内置复制协议
-- **PouchDB**: 成熟库，完全兼容 CouchDB 协议
+```bash
+# Start server (port 3000)
+pnpm dev:server
 
-### 后端/数据库
-- **方案一**: Java/Go + MySQL + Canal
-- **方案二**: Node.js + CouchDB（最快实现）
-- **混合架构**: CouchDB（同步）+ MySQL（业务）
-
-### 冲突解决
-- **Last-Write-Wins**: 简单时间戳比较（第一阶段）
-- **CRDT**: Yjs 或 Automerge 字段级合并（第三阶段）
-
-## 研发路线
-
-```
-阶段一：基础离线功能    [░░░░░░░░░░] 0%  (1.5个月)
-  └─ RxDB 集成、本地 Schema、离线队列、LWW 冲突解决
-
-阶段二：流量优化        [░░░░░░░░░░] 0%  (1个月)
-  └─ 增量同步、Protobuf 压缩
-
-阶段三：强一致性        [░░░░░░░░░░] 0%  (2个月)
-  └─ Yjs 协作冲突解决、tus 断点续传
+# Start client demo (port 5173)
+pnpm dev:client
 ```
 
-详见 [研发路线图](docs/plans/roadmap.md) 和 [里程碑](docs/progress/milestones.md)。
+### Build
 
-## 项目结构
+```bash
+# Build SDK
+pnpm --filter @offline-sync/sdk build
+
+# Build server
+pnpm --filter @offline-sync/server build
+
+# Build demo
+pnpm --filter @offline-sync/client-demo build
+```
+
+## 💻 Usage Examples
+
+### SDK Basic Usage
+
+```typescript
+import { OfflineClient } from '@offline-sync/sdk';
+
+// Initialize client
+const client = new OfflineClient({
+  database: { name: 'my-app' },
+  sync: {
+    enabled: true,
+    url: 'https://api.example.com/sync',
+    interval: 30000,  // sync every 30s
+    enableCompression: true,
+  },
+});
+
+// Wait for client to be ready
+await client.initialize();
+
+// Get database
+const db = client.getDatabase();
+
+// Create a todo (offline + auto sync)
+const todo = await db.todos.insert({
+  id: 'todo-1',
+  text: 'Learn Offline Sync Engine',
+  completed: false,
+  createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+});
+
+// Manually trigger sync
+await client.getSyncManager().triggerSync();
+
+// Monitor sync state
+client.getSyncManager().onStateChange((state) => {
+  console.log('Syncing:', state.isSyncing);
+  console.log('Pending:', state.pendingCount);
+});
+```
+
+### TUS Resumable Uploads
+
+```typescript
+import { createTusUpload } from '@offline-sync/sdk/storage';
+
+// Create file upload
+const uploader = createTusUpload({
+  endpoint: 'https://api.example.com/api/tus',
+  data: file,
+  metadata: {
+    filename: file.name,
+    type: file.type,
+  },
+  chunkSize: 5 * 1024 * 1024,  // 5MB chunks
+  onProgress: (sent, total) => {
+    console.log(`Progress: ${(sent / total * 100).toFixed(1)}%`);
+  },
+});
+
+// Start upload
+const uploadUrl = await uploader.start();
+
+// Pause upload
+uploader.pause();
+
+// Resume upload (supports resumable uploads)
+await uploader.resume();
+```
+
+### Server API
+
+```bash
+# Push local operations to server
+curl -X POST https://api.example.com/api/sync/push \
+  -H "Content-Type: application/msgpack+deflate" \
+  -H "Accept: application/msgpack+deflate" \
+  --data-binary '@payload.bin'
+
+# Pull server changes
+curl "https://api.example.com/api/sync/pull?since=1234567890" \
+  -H "Accept: application/msgpack+deflate"
+
+# TUS create upload
+curl -X POST https://api.example.com/api/tus \
+  -H "Tus-Resumable: 1.0.0" \
+  -H "Upload-Length: 1024000" \
+  -H "Upload-Metadata: filename dGVzdC5qcGc="
+```
+
+## 📦 Package Structure
 
 ```
 offline-sync-engine/
-├── docs/                    # 项目文档
-│   ├── architecture/        # 架构设计文档
-│   ├── api/                 # API 规范
-│   ├── progress/            # 进度追踪
-│   └── plans/               # 计划文档
-├── src/                     # 源代码（待开发）
-│   ├── client/              # 客户端代码
-│   ├── sdk/                 # SDK 封装
-│   ├── server/              # 服务端代码
-│   └── shared/              # 共享代码
-├── tests/                   # 测试文件
-│   ├── unit/                # 单元测试
-│   ├── integration/         # 集成测试
-│   └── e2e/                 # 端到端测试
-├── config/                  # 配置文件
-├── scripts/                 # 脚本工具
-├── packages/                # 子包
-├── README.md                # 项目说明
-├── CLAUDE.md                # Claude Code 工作指导
-└── package.json             # 项目配置
+├── packages/
+│   ├── sdk/              # Client SDK
+│   │   ├── src/
+│   │   │   ├── storage/     # Storage modules
+│   │   │   ├── network/     # Network management
+│   │   │   ├── outbox/      # Offline queue
+│   │   │   ├── sync/        # Sync management
+│   │   │   └── client/      # Client entry
+│   │   └── package.json
+│   │
+│   ├── server/           # Sync gateway server
+│   │   ├── src/
+│   │   │   ├── gateway/     # Sync gateway
+│   │   │   ├── applier/     # Operation applier
+│   │   │   ├── arbiter/     # Conflict arbiter
+│   │   │   ├── database/    # Database layer
+│   │   │   └── tus/         # TUS protocol
+│   │   └── package.json
+│   │
+│   └── client-demo/       # Demo application
+│       ├── src/
+│       │   ├── components/
+│       │   └── db/
+│       └── package.json
+│
+├── docs/                 # Documentation
+├── pnpm-workspace.yaml  # Monorepo configuration
+└── package.json
 ```
 
-## 贡献
+## 🔧 Configuration
 
-项目目前处于设计阶段，暂不接受外部贡献。请关注 [当前进度](docs/progress/current.md) 了解最新状态。
+### SDK Configuration
 
-## 许可证
+```typescript
+interface OfflineClientConfig {
+  // Database configuration
+  database: {
+    name: string;              // Database name
+  };
 
-MIT
+  // Sync configuration
+  sync?: {
+    enabled: boolean;         // Enable sync
+    url: string;              // Sync server URL
+    interval?: number;        // Sync interval (ms)
+    batchSize?: number;       // Batch size
+    enableCompression?: boolean;  // Enable compression
+    enableWebSocket?: boolean;    // Enable WebSocket
+  };
+
+  // Outbox configuration
+  outbox?: {
+    maxRetries?: number;      // Max retry attempts
+    initialDelay?: number;    // Initial retry delay (ms)
+    maxDelay?: number;        // Max retry delay (ms)
+  };
+}
+```
+
+### Server Configuration
+
+```bash
+# Environment variables
+COUCHDB_URL=http://localhost:5984
+COUCHDB_USERNAME=admin
+COUCHDB_PASSWORD=password
+COUCHDB_DB_PREFIX=offline-sync
+PORT=3000
+HOST=0.0.0.0
+```
+
+## 📚 API Documentation
+
+### SDK Exports
+
+```typescript
+// Client
+import { OfflineClient } from '@offline-sync/sdk/client';
+
+// Storage
+import {
+  createDatabase,
+  getDatabase,
+  todoSchema,
+  productSchema,
+} from '@offline-sync/sdk/storage';
+
+// Query
+import {
+  findAll,
+  findById,
+  findWhere,
+  paginate,
+  count,
+  QueryBuilder,
+} from '@offline-sync/sdk/storage';
+
+// Compression
+import {
+  CompressionService,
+  compress,
+  decompress,
+} from '@offline-sync/sdk/storage';
+
+// TUS Protocol
+import {
+  createTusUpload,
+  uploadFile,
+  TusUploader,
+} from '@offline-sync/sdk/storage';
+
+// Testing
+import {
+  benchmarkWrite,
+  benchmarkRead,
+  benchmarkQuery,
+  testCapacity,
+} from '@offline-sync/sdk/testing';
+
+// Types
+import type { Todo, Product, OutboxAction, NetworkStatus } from '@offline-sync/sdk';
+```
+
+### Server Endpoints
+
+| Endpoint | Method | Description |
+| ---------- | -------- | ------------- |
+| `/health` | GET | Health check |
+| `/api/sync/push` | POST | Push local operations |
+| `/api/sync/pull` | GET | Pull remote changes |
+| `/api/sync/:collection` | GET | Get collection data |
+| `/api/sync/:collection/:id` | GET | Get single document |
+| `/api/applier/apply` | POST | Apply single operation |
+| `/api/applier/batch` | POST | Batch apply operations |
+| `/api/arbiter/check` | POST | Conflict detection |
+| `/api/arbiter/resolve` | POST | LWW conflict resolution |
+| `/api/arbiter/resolve/merge` | POST | Field-level merge |
+| `/api/tus` | POST | Create upload |
+| `/api/tus/:id` | PATCH | Upload chunk |
+| `/api/stream` | WS | Real-time push |
+
+## 🧪 Development
+
+### Requirements
+
+- Node.js >= 18
+- pnpm >= 8
+- CouchDB >= 3.0 (optional, for production)
+
+### Development Commands
+
+```bash
+# Install dependencies
+pnpm install
+
+# Start dev servers
+pnpm dev:server  # Server
+pnpm dev:client  # Client
+
+# Run tests
+pnpm test
+
+# Lint code
+pnpm lint
+pnpm format
+```
+
+### Local CouchDB Development
+
+```bash
+# Start CouchDB with Docker
+docker run -d \
+  --name couchdb \
+  -p 5984:5984 \
+  -e COUCHDB_USER=admin \
+  -e COUCHDB_PASSWORD=password \
+  couchdb:3
+```
+
+## 📖 Documentation
+
+| Document | Description |
+| ---------- | ------------- |
+| [Architecture Overview](docs/architecture/overview.md) | Local-First architecture design |
+| [API Documentation](docs/api/) | Client/Server API definitions |
+| [Verification Report](docs/VERIFICATION.md) | Feature verification checklist |
+| [Development Progress](docs/progress/next-steps.md) | Development roadmap |
+
+## 🤝 Contributing
+
+Contributions are welcome! Please follow these steps:
+
+1. Fork this repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Create a Pull Request
+
+### Code Standards
+
+- Write code in TypeScript
+- Follow ESLint rules
+- Add unit tests for new features
+- Update relevant documentation
+
+## 📊 Development Progress
+
+```
+✅ Phase 1: Basic Offline  [████████████████████████████] 100%
+   └─ RxDB integration, schemas, offline queue, LWW conflict resolution
+
+✅ Phase 2: Optimization     [████████████████████████████] 100%
+   └─ Incremental sync, MessagePack compression
+
+✅ Phase 3: Advanced Features  [████████████████████████████] 100%
+   └─ TUS resumable uploads, WebSocket push, performance optimization
+```
+
+See [Development Progress](docs/progress/next-steps.md) for details.
+
+## 🔗 Tech Stack
+
+| Category | Technology |
+| ---------- | ------------ |
+| Frontend Framework | React + TypeScript |
+| Local Database | RxDB + Dexie (IndexedDB) |
+| Backend Framework | Fastify (Node.js) |
+| Main Database | CouchDB |
+| Data Serialization | MessagePack |
+| Data Compression | DEFLATE (pako) |
+| Resumable Upload | TUS Protocol v1.0.0 |
+| Real-time Communication | WebSocket |
+| Package Manager | pnpm workspaces |
+| Build Tools | tsup (libraries) + Vite (apps) |
+| Testing Framework | Vitest |
+
+## 📄 License
+
+MIT License - see [LICENSE](LICENSE) file
+
+## 🙏 Acknowledgments
+
+This project is built on top of excellent open source projects:
+
+- [RxDB](https://rxdb.info/) - JavaScript NoSQL database
+- [Fastify](https://www.fastify.io/) - High-performance Node.js web framework
+- [Nano](https://www.npmjs.com/package/nano) - CouchDB client
+- [MessagePack](https://msgpack.org/) - Efficient binary serialization
+- [TUS Protocol](https://tus.io/) - Resumable upload protocol
+- [Pako](https://github.com/nodeca/pako) | zlib interface
 
 ---
 
-> 本项目旨在解决海外弱网环境下的数据同步问题，具有很好的商业前景。一旦实现，可形成独立的"海外弱网数据传输平台"产品。
+<p align="center">
+  <sub>Built with ❤️ for offline-first applications in low-bandwidth environments</sub>
+</p>

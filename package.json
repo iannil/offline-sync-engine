@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "description": "Local-First 离线同步引擎，专为弱网环境优化",
   "private": true,
+  "type": "module",
   "keywords": [
     "offline-first",
     "sync",
@@ -17,25 +18,40 @@
     "packages/*"
   ],
   "scripts": {
-    "dev": "turbo run dev",
-    "build": "turbo run build",
-    "test": "turbo run test",
-    "test:integration": "turbo run test:integration",
-    "test:e2e": "turbo run test:e2e",
-    "lint": "turbo run lint",
-    "lint:fix": "turbo run lint:fix",
+    "dev": "pnpm --filter './packages/**' -r --parallel dev",
+    "dev:client": "pnpm --filter @offline-sync/client-demo dev",
+    "dev:server": "pnpm --filter @offline-sync/server dev",
+    "build": "pnpm -r --filter './packages/**' build",
+    "build:sdk": "pnpm --filter @offline-sync/sdk build",
+    "build:server": "pnpm --filter @offline-sync/server build",
+    "typecheck": "pnpm -r --filter './packages/**' typecheck",
+    "test": "pnpm -r --filter './packages/**' test",
+    "test:perf": "pnpm --filter @offline-sync/sdk test:perf",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "clean": "turbo run clean && rm -rf node_modules"
+    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "clean": "rm -rf packages/*/dist packages/*/node_modules node_modules",
+    "install:all": "pnpm install"
   },
   "devDependencies": {
-    "@types/node": "^20.10.0",
-    "prettier": "^3.1.0",
-    "turbo": "^1.11.0",
-    "typescript": "^5.3.0"
+    "@types/node": "^20.11.0",
+    "@types/react": "^18.2.48",
+    "@types/react-dom": "^18.2.18",
+    "@typescript-eslint/eslint-plugin": "^8.19.0",
+    "@typescript-eslint/parser": "^8.19.0",
+    "@typescript-eslint/typescript-estree": "^8.19.0",
+    "eslint": "^9.18.0",
+    "eslint-plugin-jsx-a11y": "^6.10.2",
+    "eslint-plugin-react": "^7.37.2",
+    "eslint-plugin-react-hooks": "^5.1.0",
+    "prettier": "^3.2.0",
+    "typescript": "^5.3.3",
+    "typescript-eslint": "^8.19.0"
   },
   "engines": {
     "node": ">=20.0.0",
-    "npm": ">=10.0.0"
+    "pnpm": ">=8.0.0"
   },
   "repository": {
     "type": "git",
