@@ -26,6 +26,8 @@
     "build:server": "pnpm --filter @offline-sync/server build",
     "typecheck": "pnpm -r --filter './packages/**' typecheck",
     "test": "pnpm -r --filter './packages/**' test",
+    "test:coverage": "pnpm -r --filter './packages/**' test:coverage",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:perf": "pnpm --filter @offline-sync/sdk test:perf",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -45,9 +47,12 @@
     "eslint-plugin-jsx-a11y": "^6.10.2",
     "eslint-plugin-react": "^7.37.2",
     "eslint-plugin-react-hooks": "^5.1.0",
+    "fastify": "^4.29.1",
     "prettier": "^3.2.0",
     "typescript": "^5.3.3",
-    "typescript-eslint": "^8.19.0"
+    "typescript-eslint": "^8.19.0",
+    "vitest": "^1.6.0",
+    "yjs": "^13.6.29"
   },
   "engines": {
     "node": ">=20.0.0",

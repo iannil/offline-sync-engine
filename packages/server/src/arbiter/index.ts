@@ -4,6 +4,7 @@
  */
 
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
+import * as Y from 'yjs';
 import { getDocument } from '../database/index.js';
 
 /**
@@ -60,6 +61,44 @@ interface VersionedDocument {
   vectorClock?: VectorClock;
   updatedAt: string;
   updatedBy?: string;
+}
+
+/**
+ * CRDT state for synchronization (matches SDK CRDTState)
+ */
+interface CRDTState {
+  /** State vector for incremental sync */
+  stateVector: number[];
+  /** Full document update (for initial sync) */
+  fullUpdate: number[];
+  /** Document ID */
+  documentId: string;
+  /** Collection name */
+  collection: string;
+}
+
+/**
+ * CRDT resolve request
+ */
+interface CRDTResolveRequest {
+  /** Client's CRDT state (base64 encoded or array) */
+  clientState: CRDTState;
+  /** Server's stored CRDT state (optional - will fetch if not provided) */
+  serverState?: CRDTState;
+  /** Client ID for tracking */
+  clientId?: string;
+}
+
+/**
+ * CRDT resolution result
+ */
+interface CRDTResolution {
+  /** Whether resolution succeeded */
+  resolved: boolean;
+  /** Merged CRDT state */
+  mergedState?: CRDTState;
+  /** Error message if failed */
+  error?: string;
 }
 
 /**
@@ -139,6 +178,27 @@ export async function registerArbiterRoutes(
 
     try {
       const resolution = await resolveConflictFieldsLWW(body);
+      return resolution;
+    } catch (error) {
+      reply.code(500);
+      return {
+        resolved: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+    }
+  });
+
+  /**
+   * POST /api/arbiter/resolve/crdt - CRDT-based conflict resolution using Yjs
+   *
+   * Merges CRDT states from client and server using Yjs's automatic
+   * conflict resolution. Returns the merged state.
+   */
+  fastify.post('/resolve/crdt', async (request, reply) => {
+    const body = request.body as CRDTResolveRequest;
+
+    try {
+      const resolution = await resolveConflictCRDT(body);
       return resolution;
     } catch (error) {
       reply.code(500);
@@ -332,21 +392,29 @@ async function resolveConflictMerge(
     const serverValue = serverDoc[key];
 
     if (clientValue !== serverValue) {
-      // Field-level LWW resolution
-      const clientFieldTime = extractFieldUpdatedAt(clientData, key);
-      const serverFieldTime = extractFieldUpdatedAt(serverDoc, key);
-
-      const resolvedValue =
-        clientFieldTime > serverFieldTime ? clientValue : serverValue;
-
-      mergedData[key] = resolvedValue;
-
-      if (clientFieldTime !== serverFieldTime) {
+      // Record the conflict only if both sides have the field
+      if (clientValue !== undefined && serverValue !== undefined) {
         conflicts.push({
           field: key,
           clientValue,
           serverValue,
         });
+      }
+
+      // If only one side has the field, use that value
+      if (clientValue === undefined && serverValue !== undefined) {
+        mergedData[key] = serverValue;
+      } else if (serverValue === undefined && clientValue !== undefined) {
+        mergedData[key] = clientValue;
+      } else {
+        // Both have values - use field-level LWW resolution
+        const clientFieldTime = extractFieldUpdatedAt(clientData, key);
+        const serverFieldTime = extractFieldUpdatedAt(serverDoc, key);
+
+        const resolvedValue =
+          clientFieldTime > serverFieldTime ? clientValue : serverValue;
+
+        mergedData[key] = resolvedValue;
       }
     }
   }
@@ -474,4 +542,100 @@ function extractUpdatedAt(doc: Record<string, unknown>): string {
  */
 function extractFieldUpdatedAt(doc: Record<string, unknown>, _field: string): number {
   return new Date(extractUpdatedAt(doc)).getTime();
+}
+
+/**
+ * Resolve conflict using Yjs CRDT
+ *
+ * This function merges two CRDT states using Yjs's built-in conflict
+ * resolution. Yjs automatically handles concurrent edits at the field level.
+ */
+async function resolveConflictCRDT(
+  request: CRDTResolveRequest
+): Promise<CRDTResolution> {
+  const { clientState, serverState } = request;
+
+  try {
+    // Create a new Yjs document to perform the merge
+    const mergeDoc = new Y.Doc();
+
+    // Convert arrays to Uint8Array and apply client state
+    const clientUpdate = new Uint8Array(clientState.fullUpdate);
+    Y.applyUpdate(mergeDoc, clientUpdate, 'client');
+
+    // If server state is provided, apply it as well
+    if (serverState) {
+      const serverUpdate = new Uint8Array(serverState.fullUpdate);
+      Y.applyUpdate(mergeDoc, serverUpdate, 'server');
+    }
+
+    // Get merged state
+    const mergedStateVector = Y.encodeStateVector(mergeDoc);
+    const mergedFullUpdate = Y.encodeStateAsUpdate(mergeDoc);
+
+    // Clean up
+    mergeDoc.destroy();
+
+    return {
+      resolved: true,
+      mergedState: {
+        stateVector: Array.from(mergedStateVector),
+        fullUpdate: Array.from(mergedFullUpdate),
+        documentId: clientState.documentId,
+        collection: clientState.collection,
+      },
+    };
+  } catch (error) {
+    return {
+      resolved: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+/**
+ * In-memory CRDT state storage for server-side documents
+ * In production, this should be persisted to a database
+ */
+const crdtStateStore = new Map<string, CRDTState>();
+
+/**
+ * Get stored CRDT state for a document
+ */
+export function getCRDTState(
+  collection: string,
+  documentId: string
+): CRDTState | undefined {
+  const key = `${collection}:${documentId}`;
+  return crdtStateStore.get(key);
+}
+
+/**
+ * Store CRDT state for a document
+ */
+export function setCRDTState(
+  collection: string,
+  documentId: string,
+  state: CRDTState
+): void {
+  const key = `${collection}:${documentId}`;
+  crdtStateStore.set(key, state);
+}
+
+/**
+ * Delete CRDT state for a document
+ */
+export function deleteCRDTState(
+  collection: string,
+  documentId: string
+): boolean {
+  const key = `${collection}:${documentId}`;
+  return crdtStateStore.delete(key);
+}
+
+/**
+ * Clear all CRDT states (useful for testing)
+ */
+export function clearCRDTStates(): void {
+  crdtStateStore.clear();
 }

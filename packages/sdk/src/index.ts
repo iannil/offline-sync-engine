@@ -22,5 +22,8 @@ export * from './client/index.js';
 // Sync
 export * from './sync/index.js';
 
+// CRDT
+export * from './crdt/index.js';
+
 // Version
 export const VERSION = '0.1.0' as const;

@@ -1,7 +1,7 @@
 # 客户端 API 规范
 
-> **状态**：草案，尚未实现
-> **版本**：v1.0.0-draft
+> **状态**：已实现
+> **版本**：v1.0.0
 
 ## 初始化
 
@@ -329,4 +329,199 @@ async function getPendingOrders() {
 
 // 清理
 await sync.cleanup(30);  // 保留30天
+```
+
+## CRDT 模块 (协作冲突解决)
+
+CRDT（Conflict-free Replicated Data Types）模块提供字段级的自动冲突解决能力，适用于多客户端协作编辑场景。
+
+### 导入与初始化
+
+```typescript
+import { CRDTManager, createCRDTManager } from '@offline-sync/sdk';
+
+// 创建 CRDT 管理器
+const crdt = createCRDTManager({
+  clientId: 'user-123',        // 可选，默认自动生成
+  gc: true,                    // 是否启用垃圾回收
+  onLocalChange: (update) => { // 本地变更回调
+    // 发送 update 到服务器
+    syncToServer(update);
+  }
+});
+```
+
+### 文档操作
+
+```typescript
+// 获取或创建文档
+const doc = crdt.getDocument('todos', 'todo-1');
+
+// 检查文档是否存在
+const exists = crdt.hasDocument('todos', 'todo-1');
+
+// 删除文档
+crdt.deleteDocument('todos', 'todo-1');
+
+// 获取所有文档键
+const keys = crdt.getDocumentKeys();
+// 返回: [{ collection: 'todos', documentId: 'todo-1' }, ...]
+```
+
+### 字段操作
+
+```typescript
+// 设置单个字段
+crdt.setField('todos', 'todo-1', 'text', 'Buy groceries');
+crdt.setField('todos', 'todo-1', 'completed', false);
+
+// 设置多个字段
+crdt.setFields('todos', 'todo-1', {
+  text: 'Buy groceries',
+  completed: false,
+  priority: 'high',
+  tags: ['shopping', 'urgent']
+});
+
+// 获取单个字段
+const text = crdt.getField('todos', 'todo-1', 'text');
+
+// 获取所有字段名
+const fieldNames = crdt.getFields('todos', 'todo-1');
+// 返回: ['text', 'completed', 'priority', 'tags']
+
+// 获取所有数据
+const data = crdt.getData('todos', 'todo-1');
+// 返回: { text: 'Buy groceries', completed: false, ... }
+```
+
+### 同步状态
+
+```typescript
+// 获取文档状态（用于同步）
+const state = crdt.getState('todos', 'todo-1');
+// state: { stateVector, fullUpdate, documentId, collection }
+
+// 获取增量更新
+const update = crdt.getIncrementalUpdate('todos', 'todo-1', sinceStateVector);
+
+// 应用远程更新
+crdt.applyUpdate({
+  update: remoteUpdate,
+  documentId: 'todo-1',
+  collection: 'todos',
+  origin: 'remote-client'
+});
+
+// 应用完整状态
+crdt.applyState(remoteState);
+
+// 合并状态
+const mergedState = crdt.merge('todos', 'todo-1', remoteState);
+
+// 标记已同步
+crdt.markSynced('todos', 'todo-1', stateVector);
+```
+
+### 序列化
+
+```typescript
+// 状态序列化为 Base64（便于网络传输）
+const base64State = CRDTManager.stateToBase64(state);
+
+// 从 Base64 反序列化
+const state = CRDTManager.stateFromBase64(base64State);
+
+// 更新序列化
+const base64Update = CRDTManager.updateToBase64(update);
+const update = CRDTManager.updateFromBase64(base64Update);
+```
+
+### 清理
+
+```typescript
+// 获取客户端 ID
+const clientId = crdt.getClientId();
+
+// 销毁管理器
+crdt.destroy();
+```
+
+### 完整 CRDT 示例
+
+```typescript
+import { createCRDTManager, CRDTManager } from '@offline-sync/sdk';
+
+// 客户端 A
+const crdtA = createCRDTManager({ clientId: 'client-A' });
+
+// 客户端 B
+const crdtB = createCRDTManager({ clientId: 'client-B' });
+
+// 客户端 A 创建文档
+crdtA.setFields('todos', 'shared-todo', {
+  text: 'Collaborative todo',
+  status: 'pending'
+});
+
+// 同步到客户端 B
+const stateA = crdtA.getState('todos', 'shared-todo');
+crdtB.applyState(stateA);
+
+// 两个客户端同时修改不同字段
+crdtA.setField('todos', 'shared-todo', 'status', 'in-progress');
+crdtB.setField('todos', 'shared-todo', 'priority', 'high');
+
+// 合并状态
+const stateB = crdtB.getState('todos', 'shared-todo');
+const merged = crdtA.merge('todos', 'shared-todo', stateB);
+
+// 两个修改都被保留
+console.log(crdtA.getData('todos', 'shared-todo'));
+// { text: 'Collaborative todo', status: 'in-progress', priority: 'high' }
+
+// 清理
+crdtA.destroy();
+crdtB.destroy();
+```
+
+### 与服务器同步
+
+```typescript
+import { createCRDTManager } from '@offline-sync/sdk';
+
+const crdt = createCRDTManager({
+  clientId: 'user-123',
+  onLocalChange: async (update) => {
+    // 当本地有变更时，发送到服务器
+    await fetch('/api/arbiter/resolve/crdt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clientState: {
+          stateVector: Array.from(update.update),
+          fullUpdate: Array.from(crdt.getState(update.collection, update.documentId).fullUpdate),
+          documentId: update.documentId,
+          collection: update.collection
+        },
+        clientId: crdt.getClientId()
+      })
+    });
+  }
+});
+
+// 从服务器拉取更新
+async function pullFromServer(collection: string, documentId: string) {
+  const response = await fetch(`/api/sync/pull?collection=${collection}&documentId=${documentId}`);
+  const { crdtState } = await response.json();
+
+  if (crdtState) {
+    crdt.applyState({
+      stateVector: new Uint8Array(crdtState.stateVector),
+      fullUpdate: new Uint8Array(crdtState.fullUpdate),
+      documentId,
+      collection
+    });
+  }
+}
 ```

@@ -1,6 +1,9 @@
 /**
  * Performance tests for the offline sync engine
  * @module performance.test
+ *
+ * Note: These tests require IndexedDB and should run in a browser environment.
+ * They are skipped in Node.js.
  */
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
@@ -12,7 +15,10 @@ import {
   testCapacity,
 } from './testing/performance.js';
 
-describe('Performance Benchmarks', () => {
+// Skip if IndexedDB is not available (e.g., Node.js environment)
+const isIndexedDBAvailable = typeof indexedDB !== 'undefined';
+
+describe.skipIf(!isIndexedDBAvailable)('Performance Benchmarks', () => {
   let db: Awaited<ReturnType<typeof createDatabase>>;
 
   beforeAll(async () => {

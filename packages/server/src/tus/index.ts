@@ -92,6 +92,13 @@ function extractFileExtension(metadata: Record<string, string>): string {
 }
 
 /**
+ * Clear all uploads (for testing)
+ */
+export function clearUploads(): void {
+  uploads.clear();
+}
+
+/**
  * Clean up expired uploads (older than 24 hours)
  */
 export function cleanupExpiredUploads(): void {
@@ -131,6 +138,15 @@ export async function registerTusRoutes(
 ) {
   // Ensure upload directory exists
   await ensureUploadDir();
+
+  // Add content-type parser for TUS protocol
+  fastify.addContentTypeParser(
+    'application/offset+octet-stream',
+    { parseAs: 'buffer' },
+    (request, payload, done) => {
+      done(null, payload);
+    }
+  );
 
   // Start cleanup interval
   const cleanupInterval = setInterval(cleanupExpiredUploads, 60 * 60 * 1000);
@@ -259,9 +275,8 @@ export async function registerTusRoutes(
       return { error: 'Offset mismatch' };
     }
 
-    // Get chunk data
-    const chunk = request.raw as unknown as { body: Buffer };
-    const data = chunk.body || Buffer.alloc(0);
+    // Get chunk data - body is parsed by the content-type parser
+    const data = request.body as Buffer || Buffer.alloc(0);
 
     if (data.length === 0) {
       reply.code(400);
