@@ -8,7 +8,6 @@ import {
   getDocument,
   insertDocument,
   updateDocument,
-  deleteDocument,
   bulkInsert,
   getDatabaseInfo,
 } from '../database/index.js';
@@ -48,7 +47,7 @@ export interface BatchApplyResult {
  */
 export async function registerApplierRoutes(
   fastify: FastifyInstance,
-  options: FastifyPluginOptions
+  _options: FastifyPluginOptions
 ) {
   /**
    * POST /api/applier/apply - Apply a single action
@@ -72,7 +71,7 @@ export async function registerApplierRoutes(
   /**
    * POST /api/applier/batch - Apply multiple actions
    */
-  fastify.post('/batch', async (request, reply) => {
+  fastify.post('/batch', async (request, _reply) => {
     const actions = request.body as Action[];
     const results = await applyBatchActions(actions);
     return results;
@@ -244,7 +243,7 @@ export async function applyBatchActions(actions: Action[]): Promise<BatchApplyRe
   // Process each collection's actions
   for (const [collection, collectionActions] of actionsByCollection) {
     // Prepare bulk documents
-    const bulkDocs: Array<{ _id: string; _rev?: string; deleted?: boolean }> = [];
+    const bulkDocs: Array<{ _id: string; _rev?: string; deleted?: boolean; [key: string]: unknown }> = [];
 
     for (const action of collectionActions) {
       try {
@@ -321,7 +320,7 @@ export async function applyBatchActions(actions: Action[]): Promise<BatchApplyRe
             });
           }
         }
-      } catch (error) {
+      } catch {
         // If bulk fails, try individual operations
         for (const doc of bulkDocs) {
           try {

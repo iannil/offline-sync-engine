@@ -108,7 +108,7 @@ export class CompressionService {
     if (this.options.useCompression) {
       try {
         result = inflate(data);
-      } catch (error) {
+      } catch {
         console.warn('Failed to decompress, assuming uncompressed data');
         result = data;
       }

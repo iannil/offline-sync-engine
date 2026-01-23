@@ -8,8 +8,18 @@ import type { OutboxManager } from '../outbox/index.js';
 import type { NetworkManager } from '../network/index.js';
 import type { CompressionOptions } from '../storage/compression.js';
 import { getNetworkManager } from '../network/index.js';
-import { ActionType, ActionStatus } from '../outbox/index.js';
-import { compress, decompress, compressToBase64, decompressFromBase64 } from '../storage/compression.js';
+import { ActionStatus } from '../outbox/index.js';
+import { decompress, compressToBase64 } from '../storage/compression.js';
+import { CRDTManager, type CRDTState } from '../crdt/index.js';
+import { VectorClock, type VectorClockMap, type ClockComparison } from './vector-clock.js';
+
+// Re-export VectorClock for external use
+export { VectorClock, createVectorClock, type VectorClockMap, type ClockComparison } from './vector-clock.js';
+
+/**
+ * Conflict resolution strategy
+ */
+export type ConflictResolutionStrategy = 'lww' | 'crdt';
 
 /**
  * Sync configuration
@@ -30,6 +40,17 @@ export interface SyncConfig {
    * Compression options (uses defaults if not specified)
    */
   compressionOptions?: CompressionOptions;
+  /**
+   * Conflict resolution strategy
+   * - 'lww': Last-Write-Wins based on timestamp (default)
+   * - 'crdt': Field-level merge using Yjs CRDT
+   * @default 'lww'
+   */
+  conflictResolution?: ConflictResolutionStrategy;
+  /**
+   * Client ID for CRDT (auto-generated if not provided)
+   */
+  clientId?: string;
 }
 
 /**
@@ -56,6 +77,8 @@ export interface SyncState {
   isSyncing: boolean;
   pendingCount: number;
   error: string | null;
+  /** Current vector clock state */
+  vectorClock: VectorClockMap;
 }
 
 /**
@@ -91,6 +114,7 @@ interface PullResponse {
     timestamp: number;
   }>;
   since?: number;
+  serverVectorClock?: VectorClockMap;
 }
 
 /**
@@ -109,7 +133,15 @@ export class SyncManager {
     websocketUrl: string;
     enableCompression: boolean;
     compressionOptions?: CompressionOptions;
+    conflictResolution: ConflictResolutionStrategy;
+    clientId?: string;
   };
+
+  // CRDT manager for field-level conflict resolution
+  private crdtManager: CRDTManager | null = null;
+
+  // Vector clock for causal ordering
+  private vectorClock: VectorClock;
 
   private syncTimer?: ReturnType<typeof setInterval>;
   private syncPromise: Promise<SyncResult> | null = null;
@@ -127,12 +159,14 @@ export class SyncManager {
     isSyncing: false,
     pendingCount: 0,
     error: null,
+    vectorClock: {},
   };
 
   private stateChangeCallbacks: Array<(state: SyncState) => void> = [];
 
-  private defaultConfig: Omit<Required<SyncConfig>, 'url' | 'compressionOptions'> & {
+  private defaultConfig: Omit<Required<SyncConfig>, 'url' | 'compressionOptions' | 'clientId'> & {
     compressionOptions?: CompressionOptions;
+    clientId?: string;
   } = {
     interval: 60000,
     batchSize: 100,
@@ -141,6 +175,8 @@ export class SyncManager {
     websocketUrl: '',
     enableCompression: true,
     compressionOptions: undefined,
+    conflictResolution: 'lww',
+    clientId: undefined,
   };
 
   constructor(
@@ -153,6 +189,11 @@ export class SyncManager {
     this.config = { ...this.defaultConfig, ...config };
     this.network = getNetworkManager();
 
+    // Initialize vector clock with client ID
+    const clientId = this.config.clientId || `client-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+    this.vectorClock = new VectorClock(clientId);
+    this.state.vectorClock = this.vectorClock.getClock();
+
     this.init();
   }
 
@@ -160,6 +201,17 @@ export class SyncManager {
    * Initialize sync manager
    */
   private init(): void {
+    // Initialize CRDT manager if using CRDT conflict resolution
+    if (this.config.conflictResolution === 'crdt') {
+      this.crdtManager = new CRDTManager({
+        clientId: this.config.clientId,
+        onLocalChange: (update) => {
+          // When local CRDT changes occur, trigger sync
+          console.log('CRDT local change detected:', update.collection, update.documentId);
+        },
+      });
+    }
+
     // Start periodic sync
     this.startPeriodicSync();
 
@@ -303,6 +355,9 @@ export class SyncManager {
     }
 
     try {
+      // Increment vector clock for this push
+      this.vectorClock.increment();
+
       const requestData = {
         actions: actions.map((a) => ({
           id: a.id,
@@ -312,7 +367,9 @@ export class SyncManager {
           data: a.data,
           timestamp: a.timestamp,
         })),
-      } as PushRequest;
+        vectorClock: this.vectorClock.getClock(),
+        clientId: this.vectorClock.getClientId(),
+      } as PushRequest & { vectorClock: VectorClockMap; clientId: string };
 
       // Prepare request
       const headers: HeadersInit = {
@@ -369,6 +426,28 @@ export class SyncManager {
         errors.push(item);
       }
 
+      // Save updated vector clock after successful push
+      if (succeeded.length > 0) {
+        const currentVectorClock = this.vectorClock.getClock();
+        const metadataDoc = await this.db.sync_metadata
+          .findOne()
+          .where('id')
+          .equals('default')
+          .exec();
+
+        if (metadataDoc) {
+          await metadataDoc.patch({ vectorClock: currentVectorClock });
+        } else {
+          await this.db.sync_metadata.insert({
+            id: 'default',
+            lastSyncAt: Date.now(),
+            vectorClock: currentVectorClock,
+          });
+        }
+
+        this.updateState({ vectorClock: currentVectorClock });
+      }
+
       return {
         synced: succeeded.length,
         failed: failed.length,
@@ -391,7 +470,7 @@ export class SyncManager {
    * Pull remote changes from server
    */
   private async pull(): Promise<void> {
-    // Get last sync timestamp
+    // Get last sync timestamp and vector clock
     const metadataDoc = await this.db.sync_metadata
       .findOne()
       .where('id')
@@ -399,6 +478,14 @@ export class SyncManager {
       .exec();
 
     const lastSyncAt = metadataDoc?.lastSyncAt ?? 0;
+    const savedVectorClock = metadataDoc?.vectorClock ?? {};
+
+    // Restore vector clock from storage if available
+    if (Object.keys(savedVectorClock).length > 0) {
+      for (const [clientId, timestamp] of Object.entries(savedVectorClock)) {
+        this.vectorClock.setTimestamp(clientId, timestamp as number);
+      }
+    }
 
     const headers: HeadersInit = {
       ...this.config.headers,
@@ -409,8 +496,11 @@ export class SyncManager {
       headers['Accept'] = 'application/msgpack+deflate, application/json';
     }
 
+    // Include vector clock in request
+    const vectorClockParam = encodeURIComponent(JSON.stringify(this.vectorClock.getClock()));
+
     const response = await fetch(
-      `${this.config.url}/pull?since=${lastSyncAt}`,
+      `${this.config.url}/pull?since=${lastSyncAt}&vectorClock=${vectorClockParam}&clientId=${this.vectorClock.getClientId()}`,
       {
         method: 'GET',
         headers,
@@ -434,6 +524,11 @@ export class SyncManager {
       result = (await response.json()) as PullResponse;
     }
 
+    // Merge server's vector clock if provided
+    if (result.serverVectorClock) {
+      this.vectorClock.merge(result.serverVectorClock);
+    }
+
     // Apply remote changes
     for (const item of result.items) {
       const collection = this.db[item.collection] as any;
@@ -445,33 +540,73 @@ export class SyncManager {
           .equals(item.document.id)
           .exec();
 
-        if (exists) {
-          // Update existing document
-          await exists.patch({
-            ...item.document,
-            updatedAt: new Date().toISOString(),
-          });
+        if (this.crdtManager && this.config.conflictResolution === 'crdt') {
+          // Use CRDT for conflict resolution
+          const docId = item.document.id as string;
+
+          // If the document has CRDT state from server, apply it
+          if (item.document._crdtState) {
+            const crdtState = CRDTManager.stateFromBase64(item.document._crdtState as string);
+            this.crdtManager.merge(item.collection, docId, crdtState);
+          } else {
+            // No CRDT state, initialize from server data
+            const { _crdtState: _, id: _id, ...fields } = item.document as Record<string, unknown>;
+            this.crdtManager.setFields(item.collection, docId, fields);
+          }
+
+          // Get merged data from CRDT
+          const mergedData = this.crdtManager.getData(item.collection, docId);
+
+          if (exists) {
+            await exists.patch({
+              ...mergedData,
+              id: docId,
+              updatedAt: new Date().toISOString(),
+            });
+          } else {
+            await collection.insert({
+              ...mergedData,
+              id: docId,
+              updatedAt: new Date().toISOString(),
+            });
+          }
         } else {
-          // Insert new document
-          await collection.insert({
-            ...item.document,
-            updatedAt: new Date().toISOString(),
-          });
+          // LWW: Simple overwrite
+          if (exists) {
+            // Update existing document
+            await exists.patch({
+              ...item.document,
+              updatedAt: new Date().toISOString(),
+            });
+          } else {
+            // Insert new document
+            await collection.insert({
+              ...item.document,
+              updatedAt: new Date().toISOString(),
+            });
+          }
         }
       }
     }
 
-    // Update sync metadata
+    // Update sync metadata with vector clock
     const now = Date.now();
+    const currentVectorClock = this.vectorClock.getClock();
     if (metadataDoc) {
-      await metadataDoc.patch({ lastSyncAt: now });
+      await metadataDoc.patch({
+        lastSyncAt: now,
+        vectorClock: currentVectorClock,
+      });
     } else {
       await this.db.sync_metadata.insert({
         id: 'default',
         lastSyncAt: now,
-        vectorClock: {},
+        vectorClock: currentVectorClock,
       });
     }
+
+    // Update state with current vector clock
+    this.updateState({ vectorClock: currentVectorClock });
   }
 
   /**
@@ -665,18 +800,49 @@ export class SyncManager {
       .equals(change.document.id)
       .exec();
 
-    if (exists) {
-      // Update existing document
-      await exists.patch({
-        ...change.document,
-        updatedAt: new Date().toISOString(),
-      });
+    if (this.crdtManager && this.config.conflictResolution === 'crdt') {
+      // Use CRDT for conflict resolution
+      const docId = change.document.id as string;
+
+      // If the document has CRDT state from server, apply it
+      if (change.document._crdtState) {
+        const crdtState = CRDTManager.stateFromBase64(change.document._crdtState as string);
+        this.crdtManager.merge(change.collection, docId, crdtState);
+      } else {
+        // No CRDT state, initialize from server data
+        const { _crdtState: _, id: _id, ...fields } = change.document;
+        this.crdtManager.setFields(change.collection, docId, fields);
+      }
+
+      // Get merged data from CRDT
+      const mergedData = this.crdtManager.getData(change.collection, docId);
+
+      if (exists) {
+        await exists.patch({
+          ...mergedData,
+          id: docId,
+          updatedAt: new Date().toISOString(),
+        });
+      } else {
+        await collection.insert({
+          ...mergedData,
+          id: docId,
+          updatedAt: new Date().toISOString(),
+        });
+      }
     } else {
-      // Insert new document
-      await collection.insert({
-        ...change.document,
-        updatedAt: new Date().toISOString(),
-      });
+      // LWW: Simple overwrite
+      if (exists) {
+        await exists.patch({
+          ...change.document,
+          updatedAt: new Date().toISOString(),
+        });
+      } else {
+        await collection.insert({
+          ...change.document,
+          updatedAt: new Date().toISOString(),
+        });
+      }
     }
   }
 
@@ -698,6 +864,105 @@ export class SyncManager {
   }
 
   /**
+   * Get the CRDT manager (if using CRDT conflict resolution)
+   */
+  getCRDTManager(): CRDTManager | null {
+    return this.crdtManager;
+  }
+
+  /**
+   * Get CRDT state for a specific document (for sync with server)
+   * Returns null if CRDT is not enabled
+   */
+  getCRDTState(collection: string, documentId: string): CRDTState | null {
+    if (!this.crdtManager) {
+      return null;
+    }
+    return this.crdtManager.getState(collection, documentId);
+  }
+
+  /**
+   * Get CRDT state as base64 string for transport
+   * Returns null if CRDT is not enabled
+   */
+  getCRDTStateBase64(collection: string, documentId: string): string | null {
+    const state = this.getCRDTState(collection, documentId);
+    if (!state) {
+      return null;
+    }
+    return CRDTManager.stateToBase64(state);
+  }
+
+  /**
+   * Update a field in the local CRDT document
+   * This is useful for tracking local changes before sync
+   */
+  updateCRDTField(
+    collection: string,
+    documentId: string,
+    field: string,
+    value: unknown
+  ): void {
+    if (!this.crdtManager) {
+      console.warn('CRDT is not enabled. Use conflictResolution: "crdt" in config.');
+      return;
+    }
+    this.crdtManager.setField(collection, documentId, field, value);
+  }
+
+  /**
+   * Update multiple fields in the local CRDT document
+   */
+  updateCRDTFields(
+    collection: string,
+    documentId: string,
+    fields: Record<string, unknown>
+  ): void {
+    if (!this.crdtManager) {
+      console.warn('CRDT is not enabled. Use conflictResolution: "crdt" in config.');
+      return;
+    }
+    this.crdtManager.setFields(collection, documentId, fields);
+  }
+
+  /**
+   * Get the current vector clock instance
+   */
+  getVectorClock(): VectorClock {
+    return this.vectorClock;
+  }
+
+  /**
+   * Get the current vector clock state as a plain object
+   */
+  getVectorClockState(): VectorClockMap {
+    return this.vectorClock.getClock();
+  }
+
+  /**
+   * Compare local vector clock with a remote clock
+   * Returns: 'equal', 'before', 'after', or 'concurrent'
+   */
+  compareVectorClock(remoteClock: VectorClockMap): ClockComparison {
+    return this.vectorClock.compare(remoteClock);
+  }
+
+  /**
+   * Check if there are potential conflicts with a remote clock
+   * Returns true if clocks are concurrent (neither dominates)
+   */
+  hasConflictWith(remoteClock: VectorClockMap): boolean {
+    return this.vectorClock.isConcurrentWith(remoteClock);
+  }
+
+  /**
+   * Get the current conflict resolution strategy
+   */
+  getConflictResolutionStrategy(): ConflictResolutionStrategy {
+    return this.config.conflictResolution;
+  }
+
+  /**
    * Destroy the sync manager
    */
   async destroy(): Promise<void> {
@@ -705,5 +970,11 @@ export class SyncManager {
     this.stopPeriodicSync();
     this.disconnectWebSocket();
     this.stateChangeCallbacks = [];
+
+    // Destroy CRDT manager
+    if (this.crdtManager) {
+      this.crdtManager.destroy();
+      this.crdtManager = null;
+    }
   }
 }

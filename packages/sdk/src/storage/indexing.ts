@@ -295,7 +295,7 @@ export type QueryHint =
 /**
  * Optimized query builder
  */
-export class OptimizedQueryBuilder<T extends RxDocument> {
+export class OptimizedQueryBuilder<_T extends RxDocument> {
   private collection: RxCollection;
   private indexManager: IndexManager;
   private hints: Set<QueryHint> = new Set();

@@ -3,7 +3,10 @@
  * @module database
  */
 
-import nano, { type Nano } from 'nano';
+import nano from 'nano';
+
+type NanoInstance = ReturnType<typeof nano>;
+type DocumentScope<_T> = ReturnType<NanoInstance['db']['use']>;
 
 /**
  * CouchDB configuration
@@ -28,8 +31,8 @@ const DEFAULT_CONFIG: Required<CouchDBConfig> = {
 /**
  * CouchDB connection singleton
  */
-let nanoInstance: Nano<Document> | null = null;
-let databases: Map<string, Nano.DocumentScope<any>> = new Map();
+let nanoInstance: NanoInstance | null = null;
+const databases: Map<string, DocumentScope<unknown>> = new Map();
 
 /**
  * Initialize CouchDB connection
@@ -37,7 +40,7 @@ let databases: Map<string, Nano.DocumentScope<any>> = new Map();
  * @param config - CouchDB configuration
  * @returns Promise resolving to the nano instance
  */
-export async function initCouchDB(config: CouchDBConfig = {}): Promise<Nano<Document>> {
+export async function initCouchDB(config: CouchDBConfig = {}): Promise<NanoInstance> {
   if (nanoInstance) {
     return nanoInstance;
   }
@@ -65,7 +68,7 @@ export async function initCouchDB(config: CouchDBConfig = {}): Promise<Nano<Docu
 /**
  * Get the nano instance (initializes if needed)
  */
-export async function getCouchDB(): Promise<Nano<Document>> {
+export async function getCouchDB(): Promise<NanoInstance> {
   if (!nanoInstance) {
     return initCouchDB();
   }
@@ -75,7 +78,7 @@ export async function getCouchDB(): Promise<Nano<Document>> {
 /**
  * Ensure all required databases exist
  */
-async function ensureDatabases(nano: Nano<Document>): Promise<void> {
+async function ensureDatabases(nano: NanoInstance): Promise<void> {
   const dbNames = [
     `${DEFAULT_CONFIG.databasePrefix}-todos`,
     `${DEFAULT_CONFIG.databasePrefix}-products`,
@@ -105,7 +108,7 @@ async function ensureDatabases(nano: Nano<Document>): Promise<void> {
  * @param collection - Collection name (todos, products, etc.)
  * @returns Promise resolving to the database scope
  */
-export async function getDatabase(collection: string): Promise<Nano.DocumentScope<any>> {
+export async function getDatabase(collection: string): Promise<DocumentScope<unknown>> {
   const nano = await getCouchDB();
   const dbName = `${DEFAULT_CONFIG.databasePrefix}-${collection}`;
 
@@ -121,7 +124,7 @@ export async function getDatabase(collection: string): Promise<Nano.DocumentScop
     await db.info();
     databases.set(dbName, db);
     return db;
-  } catch (error) {
+  } catch {
     // Database doesn't exist, create it
     await nano.db.create(dbName);
     const db = nano.db.use(dbName);
@@ -163,12 +166,12 @@ export async function getDocument<T = any>(
  * @param doc - Document to insert
  * @returns Promise resolving to the created document
  */
-export async function insertDocument<T = any>(
+export async function insertDocument<T = unknown>(
   collection: string,
   doc: T
 ): Promise<T> {
   const db = await getDatabase(collection);
-  const result = await db.insert(doc);
+  const result = await db.insert(doc as Parameters<typeof db.insert>[0]);
   return result as T;
 }
 
@@ -179,12 +182,12 @@ export async function insertDocument<T = any>(
  * @param doc - Document with _id and _rev
  * @returns Promise resolving to the updated document
  */
-export async function updateDocument<T = any>(
+export async function updateDocument<T = unknown>(
   collection: string,
   doc: T
 ): Promise<T> {
   const db = await getDatabase(collection);
-  const result = await db.insert(doc);
+  const result = await db.insert(doc as Parameters<typeof db.insert>[0]);
   return result as T;
 }
 
@@ -213,21 +216,24 @@ export async function deleteDocument(
  * @param options - Query options (limit, skip, sort, etc.)
  * @returns Promise resolving to the query result
  */
-export async function queryDocuments<T = any>(
+export async function queryDocuments<T = unknown>(
   collection: string,
   selector: Record<string, unknown>,
   options: {
     limit?: number;
     skip?: number;
-    sort?: Record<string, 'asc' | 'desc'>;
+    sort?: Array<{ [key: string]: 'asc' | 'desc' }>;
     fields?: string[];
   } = {}
 ): Promise<T[]> {
   const db = await getDatabase(collection);
 
   const result = await db.find({
-    selector,
-    ...options,
+    selector: selector as Parameters<typeof db.find>[0]['selector'],
+    limit: options.limit,
+    skip: options.skip,
+    sort: options.sort,
+    fields: options.fields,
   });
 
   return result.docs as T[];
@@ -263,9 +269,9 @@ export async function getChanges(
     include_docs: true,
   });
 
-  return changes.results.map((r) => ({
+  return changes.results.map((r: { id: string; seq: string | number; deleted?: boolean; doc?: unknown }) => ({
     id: r.id,
-    seq: r.seq,
+    seq: String(r.seq),
     deleted: r.deleted || false,
     doc: r.doc,
   }));
@@ -316,7 +322,7 @@ export async function resetDatabases(): Promise<void> {
  */
 export async function getDatabaseInfo(collection: string): Promise<{
   doc_count: number;
-  update_seq: number;
+  update_seq: number | string;
   sizes: {
     file: number;
     active: number;
@@ -324,5 +330,9 @@ export async function getDatabaseInfo(collection: string): Promise<{
   };
 }> {
   const db = await getDatabase(collection);
-  return await db.info();
+  return await db.info() as {
+    doc_count: number;
+    update_seq: number | string;
+    sizes: { file: number; active: number; external: number };
+  };
 }

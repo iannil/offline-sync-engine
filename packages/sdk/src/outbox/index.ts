@@ -277,7 +277,7 @@ export class OutboxManager {
   observe$(): Observable<OutboxAction[]> {
     return this.outboxCollection.$.pipe(
       // Map query results to plain objects
-      // @ts-ignore - RxDB observable types
+      // @ts-expect-error - RxDB observable types
       map((docs: any[]) => docs.map((doc) => doc.toJSON()))
     );
   }

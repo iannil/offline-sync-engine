@@ -10,12 +10,15 @@ import jsxA11y from 'eslint-plugin-jsx-a11y';
 export default [
   {
     ignores: [
-      'node_modules/**',
-      'dist/**',
-      'build/**',
-      'coverage/**',
-      '*.config.js',
-      '*.config.ts',
+      '**/node_modules/**',
+      '**/dist/**',
+      '**/build/**',
+      '**/coverage/**',
+      '**/*.config.js',
+      '**/*.config.ts',
+      '**/__tests__/**',
+      '**/*.test.ts',
+      '**/*.test.tsx',
     ],
   },
   ...tseslint.configs.recommended,

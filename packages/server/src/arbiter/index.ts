@@ -38,7 +38,7 @@ interface ConflictResolution {
 /**
  * Last-Write-Wins metadata
  */
-interface LWWMetadata {
+interface _LWWMetadata {
   updatedAt: string;
   updatedBy?: string;
 }
@@ -53,7 +53,7 @@ interface VectorClock {
 /**
  * Document with version info
  */
-interface VersionedDocument {
+interface _VersionedDocument {
   _id: string;
   _rev?: string;
   data: Record<string, unknown>;
@@ -106,7 +106,7 @@ interface CRDTResolution {
  */
 export async function registerArbiterRoutes(
   fastify: FastifyInstance,
-  options: FastifyPluginOptions
+  _options: FastifyPluginOptions
 ) {
   /**
    * POST /api/arbiter/check - Check for conflicts
@@ -217,7 +217,7 @@ export async function registerArbiterRoutes(
 async function detectConflict(
   request: ConflictCheckRequest
 ): Promise<boolean> {
-  const { documentId, collection, clientData, serverData } = request;
+  const { documentId, collection, serverData } = request;
 
   // If server data not provided, fetch from database
   let serverDoc = serverData;
@@ -239,7 +239,7 @@ async function detectConflict(
 
   // Compare vector clocks if available
   const clientClock = request.clientData.vectorClock as VectorClock | undefined;
-  const serverClock = serverDoc.vectorClock as VectorClock | undefined;
+  const serverClock = serverDoc?.vectorClock as VectorClock | undefined;
 
   if (clientClock && serverClock) {
     // Check if client has seen the server version
@@ -255,7 +255,7 @@ async function detectConflict(
 
   // Fallback to updatedAt comparison
   const clientUpdatedAt = (request.clientData.updatedAt as string) ?? '';
-  const serverUpdatedAt = (serverDoc.updatedAt as string) ?? '';
+  const serverUpdatedAt = (serverDoc?.updatedAt as string) ?? '';
 
   // If client has newer updates, there's a potential conflict
   const clientTime = new Date(clientUpdatedAt).getTime();
@@ -302,7 +302,7 @@ async function resolveConflictLWW(
   }
 
   const clientUpdatedAt = extractUpdatedAt(clientData);
-  const serverUpdatedAt = extractUpdatedAt(serverDoc);
+  const serverUpdatedAt = extractUpdatedAt(serverDoc ?? {});
 
   const clientTime = new Date(clientUpdatedAt).getTime();
   const serverTime = new Date(serverUpdatedAt).getTime();
@@ -380,7 +380,7 @@ async function resolveConflictMerge(
   // Compare all fields
   const allKeys = new Set([
     ...Object.keys(clientData),
-    ...Object.keys(serverDoc),
+    ...Object.keys(serverDoc ?? {}),
   ]);
 
   // Remove CouchDB metadata fields
@@ -389,7 +389,7 @@ async function resolveConflictMerge(
 
   for (const key of allKeys) {
     const clientValue = clientData[key];
-    const serverValue = serverDoc[key];
+    const serverValue = serverDoc?.[key];
 
     if (clientValue !== serverValue) {
       // Record the conflict only if both sides have the field
@@ -409,7 +409,7 @@ async function resolveConflictMerge(
       } else {
         // Both have values - use field-level LWW resolution
         const clientFieldTime = extractFieldUpdatedAt(clientData, key);
-        const serverFieldTime = extractFieldUpdatedAt(serverDoc, key);
+        const serverFieldTime = extractFieldUpdatedAt(serverDoc ?? {}, key);
 
         const resolvedValue =
           clientFieldTime > serverFieldTime ? clientValue : serverValue;

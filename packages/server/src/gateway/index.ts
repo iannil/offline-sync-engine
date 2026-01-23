@@ -122,9 +122,10 @@ export async function broadcastChange(change: ChangeRecord) {
   // Notify all WebSocket subscribers
   for (const sub of subscribers) {
     try {
-      // @ts-ignore - WebSocket is available via @fastify/websocket
-      if (sub.websocket) {
-        sub.websocket.send(JSON.stringify({
+      // WebSocket is available via @fastify/websocket
+      const ws = (sub as unknown as { websocket?: { send: (data: string) => void } }).websocket;
+      if (ws) {
+        ws.send(JSON.stringify({
           type: 'change',
           data: change,
         }));
@@ -140,7 +141,7 @@ export async function broadcastChange(change: ChangeRecord) {
  */
 export async function registerGatewayRoutes(
   fastify: FastifyInstance,
-  options: FastifyPluginOptions
+  _options: FastifyPluginOptions
 ) {
   /**
    * POST /api/sync/push - Receive client actions
@@ -149,7 +150,7 @@ export async function registerGatewayRoutes(
     const contentType = request.headers['content-type'] || '';
     const acceptCompression = request.headers['accept']?.includes('msgpack');
 
-    let body: PushRequest;
+    let body: PushRequest | undefined;
 
     try {
       // Check if request is compressed

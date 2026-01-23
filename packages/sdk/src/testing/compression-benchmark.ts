@@ -5,10 +5,6 @@
 
 import {
   CompressionService,
-  compress,
-  decompress,
-  compressToBase64,
-  decompressFromBase64,
 } from '../storage/compression.js';
 
 /**
@@ -197,7 +193,6 @@ export class CompressionBenchmark {
     const decodeEnd = performance.now();
 
     // Calculate statistics
-    const stats = this.compression.getStats();
     const originalSize = JSON.stringify(data).length;
     const compressedSize = encoded!.length;
 

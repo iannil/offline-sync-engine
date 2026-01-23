@@ -7,7 +7,7 @@
 
 import type { FastifyInstance, FastifyPluginOptions } from 'fastify';
 import { randomUUID } from 'node:crypto';
-import { mkdir, writeFile, unlink, stat } from 'node:fs/promises';
+import { mkdir, writeFile, unlink } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -120,7 +120,7 @@ export function cleanupExpiredUploads(): void {
 /**
  * Get upload by URL
  */
-function getUploadByUrl(uploadUrl: string): TusUpload | undefined {
+export function getUploadByUrl(uploadUrl: string): TusUpload | undefined {
   for (const upload of uploads.values()) {
     if (upload.uploadUrl === uploadUrl) {
       return upload;
@@ -134,7 +134,7 @@ function getUploadByUrl(uploadUrl: string): TusUpload | undefined {
  */
 export async function registerTusRoutes(
   fastify: FastifyInstance,
-  options: FastifyPluginOptions
+  _options: FastifyPluginOptions
 ) {
   // Ensure upload directory exists
   await ensureUploadDir();
@@ -175,7 +175,7 @@ export async function registerTusRoutes(
       return { error: 'Missing Upload-Length header' };
     }
 
-    const size = uploadLength ? parseInt(uploadLength, 10) : 0;
+    const size = uploadLength ? parseInt(Array.isArray(uploadLength) ? uploadLength[0] : uploadLength, 10) : 0;
     const metadata = decodeMetadata(uploadMetadata);
     const fileExtension = extractFileExtension(metadata);
 
@@ -260,7 +260,7 @@ export async function registerTusRoutes(
       return { error: 'Missing Upload-Offset header' };
     }
 
-    const offset = parseInt(uploadOffset, 10);
+    const offset = parseInt(Array.isArray(uploadOffset) ? uploadOffset[0] : uploadOffset, 10);
     const upload = uploads.get(id);
 
     if (!upload) {

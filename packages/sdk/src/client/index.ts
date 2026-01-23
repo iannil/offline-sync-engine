@@ -3,9 +3,8 @@
  * @module client
  */
 
-import type { RxDatabase } from 'rxdb';
 import { getDatabase, type DatabaseType } from '../storage/index.js';
-import { getNetworkManager, NetworkManager } from '../network/index.js';
+import { getNetworkManager, type NetworkManager } from '../network/index.js';
 import { OutboxManager } from '../outbox/index.js';
 import { SyncManager } from '../sync/index.js';
 

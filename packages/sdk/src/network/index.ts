@@ -3,7 +3,7 @@
  * @module network
  */
 
-import { Observable, Subject, BehaviorSubject } from 'rxjs';
+import { BehaviorSubject } from 'rxjs';
 
 /**
  * Network status information
@@ -317,12 +317,12 @@ interface NetworkInformation extends EventTarget {
   addEventListener(
     type: string,
     listener: EventListenerOrEventListenerObject,
-    options?: {} | boolean
+    options?: AddEventListenerOptions | boolean
   ): void;
   removeEventListener(
     type: string,
     listener: EventListenerOrEventListenerObject,
-    options?: {} | boolean
+    options?: EventListenerOptions | boolean
   ): void;
 }
 

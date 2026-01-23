@@ -15,7 +15,9 @@ import { initCouchDB } from './database/index.js';
 export interface ServerConfig {
   port?: number;
   host?: string;
-  corsOrigin?: string | string[];
+  corsOrigin?: string | string[] | boolean;
+  corsCredentials?: boolean;
+  corsMethods?: string[];
   enableWebSocket?: boolean;
   couchdb?: {
     url?: string;
@@ -26,12 +28,19 @@ export interface ServerConfig {
 
 export async function createServer(config: ServerConfig = {}) {
   const {
-    port = 3000,
-    host = '0.0.0.0',
-    corsOrigin = '*',
+    port: _port = 3000,
+    host: _host = '0.0.0.0',
+    corsOrigin = process.env.CORS_ORIGIN || '*',
+    corsCredentials = process.env.CORS_CREDENTIALS === 'true',
+    corsMethods = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     enableWebSocket = true,
     couchdb,
   } = config;
+
+  // Parse CORS origin from environment (comma-separated for multiple origins)
+  const parsedOrigin = typeof corsOrigin === 'string' && corsOrigin.includes(',')
+    ? corsOrigin.split(',').map(o => o.trim())
+    : corsOrigin;
 
   // Initialize CouchDB connection
   try {
@@ -48,9 +57,13 @@ export async function createServer(config: ServerConfig = {}) {
     },
   });
 
-  // Register CORS
+  // Register CORS with configurable options
   await server.register(cors, {
-    origin: corsOrigin,
+    origin: parsedOrigin,
+    credentials: corsCredentials,
+    methods: corsMethods,
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Id', 'X-Request-Id', 'Tus-Resumable', 'Upload-Length', 'Upload-Offset', 'Upload-Metadata', 'Upload-Defer-Length'],
+    exposedHeaders: ['Location', 'Upload-Offset', 'Upload-Length', 'Tus-Resumable', 'Tus-Version', 'Tus-Extension', 'Tus-Max-Size', 'X-Request-Id'],
   });
 
   // Register WebSocket (optional)
@@ -76,7 +89,7 @@ export async function createServer(config: ServerConfig = {}) {
   // WebSocket endpoint for real-time updates
   if (enableWebSocket) {
     server.register(async function (fastify) {
-      fastify.get('/api/stream', { websocket: true }, (connection, req) => {
+      fastify.get('/api/stream', { websocket: true }, (connection, _req) => {
         console.log('WebSocket client connected');
 
         // Subscribe to changes
@@ -90,7 +103,7 @@ export async function createServer(config: ServerConfig = {}) {
 
         connection.socket.on('message', (message) => {
           try {
-            const data = JSON.parse(message as string);
+            const data = JSON.parse(message.toString());
 
             // Handle client subscriptions
             if (data.type === 'subscribe') {

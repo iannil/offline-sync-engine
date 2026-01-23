@@ -4,13 +4,31 @@
  */
 
 import { describe, it, expect, beforeAll } from 'vitest';
-import { createServer } from '../index.js';
 import {
   initCouchDB,
   resetDatabases,
   getDocument,
   queryDocuments,
-} from '../database/index.js';
+} from './database/index.js';
+
+interface ApplyResult {
+  success: boolean;
+  documentId: string;
+}
+
+interface PullResult {
+  items: unknown[];
+  since: string | number;
+}
+
+interface ConflictCheckResult {
+  hasConflict: boolean;
+}
+
+interface ResolveResult {
+  resolved: boolean;
+  winner: 'client' | 'server' | 'merged';
+}
 
 describe('End-to-End Sync Flow', () => {
   const serverUrl = 'http://localhost:3001';
@@ -52,7 +70,7 @@ describe('End-to-End Sync Flow', () => {
 
     expect(response.ok).toBe(true);
 
-    const result = await response.json();
+    const result = await response.json() as ApplyResult;
     expect(result.success).toBe(true);
     expect(result.documentId).toBe('todo-1');
   });
@@ -97,7 +115,7 @@ describe('End-to-End Sync Flow', () => {
 
     expect(response.ok).toBe(true);
 
-    const result = await response.json();
+    const result = await response.json() as PullResult;
     expect(result.items).toBeDefined();
     expect(result.items.length).toBeGreaterThan(0);
     expect(result.since).toBeDefined();
@@ -130,7 +148,7 @@ describe('End-to-End Sync Flow', () => {
 
     expect(response.ok).toBe(true);
 
-    const result = await response.json();
+    const result = await response.json() as ConflictCheckResult;
     expect(result.hasConflict).toBeDefined();
   });
 
@@ -161,7 +179,7 @@ describe('End-to-End Sync Flow', () => {
 
     expect(response.ok).toBe(true);
 
-    const result = await response.json();
+    const result = await response.json() as ResolveResult;
     expect(result.resolved).toBe(true);
     expect(result.winner).toBe('client');
   });

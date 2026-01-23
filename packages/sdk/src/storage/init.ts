@@ -40,7 +40,7 @@ export async function createDatabase(
   const {
     name = 'offline-sync-engine',
     password,
-    multiTab = true,
+    multiTab: _multiTab = true,
   } = config;
 
   const db = await createRxDatabase<any>({
